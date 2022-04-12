@@ -2,17 +2,17 @@ package org.bimserver.database.berkeley;
 
 /******************************************************************************
  * Copyright (C) 2009-2019  BIMserver.org
- * 
+ *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
  * published by the Free Software Foundation, either version 3 of the
  * License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU Affero General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see {@literal<http://www.gnu.org/licenses/>}.
  *****************************************************************************/
@@ -33,6 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
+import com.sleepycat.je.*;
 import org.bimserver.BimserverDatabaseException;
 import org.bimserver.database.BimTransaction;
 import org.bimserver.database.BimserverLockConflictException;
@@ -44,22 +45,6 @@ import org.bimserver.database.SearchingRecordIterator;
 import org.bimserver.utils.PathUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.sleepycat.je.Cursor;
-import com.sleepycat.je.CursorConfig;
-import com.sleepycat.je.Database;
-import com.sleepycat.je.DatabaseConfig;
-import com.sleepycat.je.DatabaseEntry;
-import com.sleepycat.je.DatabaseException;
-import com.sleepycat.je.Environment;
-import com.sleepycat.je.EnvironmentConfig;
-import com.sleepycat.je.EnvironmentLockedException;
-import com.sleepycat.je.JEVersion;
-import com.sleepycat.je.LockConflictException;
-import com.sleepycat.je.LockMode;
-import com.sleepycat.je.OperationStatus;
-import com.sleepycat.je.Transaction;
-import com.sleepycat.je.TransactionConfig;
 
 public class BerkeleyKeyValueStore implements KeyValueStore {
 
@@ -126,9 +111,11 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 			String message = "A database initialisation error has occured (" + e.getMessage() + ")";
 			throw new DatabaseInitException(message);
 		}
-		
+
 		transactionConfig = new TransactionConfig();
 		transactionConfig.setReadCommitted(true);
+		transactionConfig.setSerializableIsolation(true);
+		transactionConfig.setSync(false);
 
 		safeCursorConfig = new CursorConfig();
 		safeCursorConfig.setReadCommitted(true);
@@ -159,7 +146,7 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 		DatabaseConfig databaseConfig = new DatabaseConfig();
 		databaseConfig.setKeyPrefixing(keyPrefixing);
 		databaseConfig.setAllowCreate(true);
-		boolean finalTransactional = transactional && useTransactions;
+		boolean finalTransactional = useTransactions;
 		databaseConfig.setDeferredWrite(!finalTransactional);
 //		if (!transactional) {
 //			databaseConfig.setCacheMode(CacheMode.EVICT_BIN);
@@ -171,7 +158,7 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 			return false;
 		}
 		tables.put(tableName, new TableWrapper(database, finalTransactional));
-		
+
 		return true;
 	}
 
@@ -182,7 +169,7 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 		DatabaseConfig databaseConfig = new DatabaseConfig();
 		databaseConfig.setKeyPrefixing(keyPrefixing);
 		databaseConfig.setAllowCreate(true);
-		boolean finalTransactional = transactional && useTransactions;
+		boolean finalTransactional = useTransactions;
 //		if (!transactional) {
 //			databaseConfig.setCacheMode(CacheMode.EVICT_BIN);
 //		}
@@ -194,10 +181,10 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 			return false;
 		}
 		tables.put(tableName, new TableWrapper(database, finalTransactional));
-		
+
 		return true;
 	}
-	
+
 	public boolean openTable(DatabaseSession databaseSession, String tableName, boolean transactional) throws BimserverDatabaseException {
 		if (tables.containsKey(tableName)) {
 			throw new BimserverDatabaseException("Table " + tableName + " already opened");
@@ -205,7 +192,7 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 		DatabaseConfig databaseConfig = new DatabaseConfig();
 		databaseConfig.setKeyPrefixing(keyPrefixing);
 		databaseConfig.setAllowCreate(false);
-		boolean finalTransactional = transactional && useTransactions;
+		boolean finalTransactional = useTransactions;
 //		if (!transactional) {
 //			databaseConfig.setCacheMode(CacheMode.EVICT_BIN);
 //		}
@@ -227,7 +214,7 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 		DatabaseConfig databaseConfig = new DatabaseConfig();
 		databaseConfig.setKeyPrefixing(keyPrefixing);
 		databaseConfig.setAllowCreate(false);
-		boolean finalTransactional = transactional && useTransactions;
+		boolean finalTransactional = useTransactions;
 //		if (!transactional) {
 //			databaseConfig.setCacheMode(CacheMode.EVICT_BIN);
 //		}
@@ -240,7 +227,7 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 		}
 		tables.put(tableName, new TableWrapper(database, finalTransactional));
 	}
-	
+
 	private Database getDatabase(String tableName) throws BimserverDatabaseException {
 		return getTableWrapper(tableName).getDatabase();
 	}
@@ -287,15 +274,15 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 			return LockMode.READ_UNCOMMITTED;
 		}
 	}
-	
+
 	public boolean isTransactional(DatabaseSession databaseSession, String tableName) throws BimserverDatabaseException {
 		return getTableWrapper(tableName).isTransactional() ? getTransaction(databaseSession) != null : false;
 	}
-	
+
 	public Transaction getTransaction(DatabaseSession databaseSession, TableWrapper tableWrapper) {
 		return tableWrapper.isTransactional() ? getTransaction(databaseSession) : null;
 	}
-	
+
 	public CursorConfig getCursorConfig(TableWrapper tableWrapper) {
 		if (tableWrapper.isTransactional()) {
 			return safeCursorConfig;
@@ -303,7 +290,7 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 			return unsafeCursorConfig;
 		}
 	}
-	
+
 	@Override
 	public byte[] get(String tableName, byte[] keyBytes, DatabaseSession databaseSession) throws BimserverDatabaseException {
 		DatabaseEntry key = new DatabaseEntry(keyBytes);
@@ -459,7 +446,7 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 			LOGGER.error("", e);
 		}
 	}
-	
+
 	@Override
 	public void delete(String indexTableName, byte[] featureBytesOldIndex, byte[] array, DatabaseSession databaseSession) throws BimserverLockConflictException {
 		try {
@@ -521,7 +508,7 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 	public void store(String tableName, byte[] key, byte[] value, DatabaseSession databaseSession) throws BimserverDatabaseException, BimserverLockConflictException {
 		store(tableName, key, value, 0, value.length, databaseSession);
 	}
-	
+
 	@Override
 	public void store(String tableName, byte[] key, byte[] value, int offset, int length, DatabaseSession databaseSession) throws BimserverDatabaseException, BimserverLockConflictException {
 		DatabaseEntry dbKey = new DatabaseEntry(key);
@@ -540,7 +527,7 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 	public void storeNoOverwrite(String tableName, byte[] key, byte[] value, DatabaseSession databaseSession) throws BimserverDatabaseException, BimserverLockConflictException, BimserverConcurrentModificationDatabaseException {
 		storeNoOverwrite(tableName, key, value, 0, value.length, databaseSession);
 	}
-	
+
 	@Override
 	public void storeNoOverwrite(String tableName, byte[] key, byte[] value, int index, int length, DatabaseSession databaseSession) throws BimserverDatabaseException, BimserverLockConflictException, BimserverConcurrentModificationDatabaseException {
 		DatabaseEntry dbKey = new DatabaseEntry(key);
@@ -569,7 +556,7 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 			throw new BimserverDatabaseException("", e);
 		}
 	}
-	
+
 	@Override
 	public String getType() {
 		return "Berkeley DB Java Edition " + JEVersion.CURRENT_VERSION.toString();
@@ -588,11 +575,11 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 		}
 		return size;
 	}
-	
+
 	public Set<String> getAllTableNames() {
 		return new HashSet<String>(environment.getDatabaseNames());
 	}
-	
+
 	public synchronized void incrementReads(long reads) {
 		this.reads += reads;
 		if (this.reads / 1000000 != lastPrintedReads) {
@@ -600,7 +587,7 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 			lastPrintedReads = this.reads / 1000000;
 		}
 	}
-	
+
 	@Override
 	public synchronized void incrementCommittedWrites(long committedWrites) {
 		this.committedWrites += committedWrites;
@@ -608,7 +595,7 @@ public class BerkeleyKeyValueStore implements KeyValueStore {
 		if (this.committedWrites / printThreshold != lastPrintedCommittedWrites) {
 			lastPrintedCommittedWrites = this.committedWrites / printThreshold;
 			long start = System.nanoTime();
-			
+
 			// This is a test, when writing large amount of data (IFC data), this should keep memory usage limited because it'll write the data to disk
 			sync();
 			long end = System.nanoTime();
